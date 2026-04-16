@@ -28,6 +28,20 @@ Scripts are idempotent: each stage skips work already done and each higher-level
 - `cmd/commanderd/` — standalone gRPC server binary (used by `LET_IT_RIP.sh`)
 - `internal/smoke/` — tiny Commander client invoked by `LET_IT_RIP.sh` to exercise a running `commanderd` end-to-end. Not a public package; extend it (or add a sibling) when adding script-driven checks rather than shelling out ad-hoc.
 
+## Fuzzing
+
+`commander/fuzz_test.go` holds three Go native fuzz targets. `test.sh` runs each for `FUZZTIME` (default `5s`) per invocation so regressions get a nontrivial continuous sampling; set `FUZZTIME=0` to skip entirely, or e.g. `FUZZTIME=2m` for a longer burn.
+
+| Target                    | What it exercises                                                         |
+|---------------------------|---------------------------------------------------------------------------|
+| `FuzzShell_EchoArgs`      | End-to-end stream plumbing: fuzzed bytes → `/bin/echo` argv → gRPC stream |
+| `FuzzCommand_Roundtrip`   | `Command` proto marshal/unmarshal consistency                             |
+| `FuzzOutput_Roundtrip`    | `Output` proto marshal/unmarshal consistency                              |
+
+**Safety rule** (enforced by fuzz target design, not runtime checks): fuzzer-controlled bytes must **never** reach `/bin/sh -c`. `FuzzShell_EchoArgs` only puts fuzzed bytes in an argv slot to `/bin/echo`. If you add a new `Shell`-level target, keep it to Args mode with a known-safe binary.
+
+Corpus and failing inputs land in `commander/testdata/fuzz/<target>/`. Go replays any file there as a regular test case on `go test`, so a crash discovered once is regression-guarded forever (commit the failure file).
+
 ## Important
 
 Never edit generated `*.pb.go` / `*_grpc.pb.go` by hand — `build.sh` stomps them whenever the `.proto` is newer. Change the `.proto` and re-run `build.sh`.

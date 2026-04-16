@@ -17,12 +17,16 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-const bufSize = 1 << 20
+// bufconn buffer. Sized for concurrent fuzz workers: each fuzz target caps
+// payloads at ~10 KiB, 10 workers × 10 KiB × headroom for gRPC framing fits
+// comfortably in 16 MiB.
+const bufSize = 1 << 24
 
 // startServer spins up an in-process Commander server over bufconn and
-// returns a client plus a cleanup function.
-func startServer(t *testing.T) (CommanderClient, func()) {
-	t.Helper()
+// returns a client plus a cleanup function. Accepts testing.TB so both
+// *testing.T and *testing.F (fuzz) can use it.
+func startServer(tb testing.TB) (CommanderClient, func()) {
+	tb.Helper()
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
@@ -39,7 +43,7 @@ func startServer(t *testing.T) (CommanderClient, func()) {
 	)
 	if err != nil {
 		srv.Stop()
-		t.Fatalf("dial bufconn: %v", err)
+		tb.Fatalf("dial bufconn: %v", err)
 	}
 
 	cleanup := func() {
@@ -51,8 +55,8 @@ func startServer(t *testing.T) (CommanderClient, func()) {
 }
 
 // drain collects every Output chunk the server sends until EOF or error.
-func drain(t *testing.T, stream grpc.ServerStreamingClient[Output]) (stdout, stderr []byte, err error) {
-	t.Helper()
+func drain(tb testing.TB, stream grpc.ServerStreamingClient[Output]) (stdout, stderr []byte, err error) {
+	tb.Helper()
 	var outBuf, errBuf bytes.Buffer
 	for {
 		msg, rerr := stream.Recv()
