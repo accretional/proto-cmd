@@ -30,7 +30,7 @@ Scripts are idempotent: each stage skips work already done and each higher-level
 
 ## Fuzzing
 
-`commander/fuzz_test.go` holds three Go native fuzz targets. `test.sh` runs each for `FUZZTIME` (default `5s`) per invocation so regressions get a nontrivial continuous sampling; set `FUZZTIME=0` to skip entirely, or e.g. `FUZZTIME=2m` for a longer burn.
+`commander/fuzz_test.go` holds three Go native fuzz targets. `test.sh` runs each for `FUZZTIME` (default `2s`) with `FUZZPARALLEL` workers (default `2`) so regressions get continuous sampling without saturating the host; set `FUZZTIME=0` to skip entirely, or e.g. `FUZZTIME=2m FUZZPARALLEL=4` for a longer, deeper burn.
 
 | Target                    | What it exercises                                                         |
 |---------------------------|---------------------------------------------------------------------------|

@@ -5,14 +5,16 @@ Go native fuzz targets live in `commander/fuzz_test.go`. `test.sh` runs each one
 ## TL;DR
 
 ```bash
-./test.sh                       # runs each target for 5s (default)
-FUZZTIME=30s ./test.sh          # longer per-target burn
-FUZZTIME=5m ./test.sh           # overnight-ish
-FUZZTIME=0 ./test.sh            # skip fuzz entirely
+./test.sh                                     # each target: 2s, 2 workers (default)
+FUZZTIME=30s ./test.sh                        # longer per-target burn
+FUZZTIME=5m FUZZPARALLEL=4 ./test.sh          # deeper burn, more workers
+FUZZTIME=0 ./test.sh                          # skip fuzz entirely
 
 # target one explicitly
-go test -run=^$ -fuzz=^FuzzCommand_Roundtrip$ -fuzztime=2m ./commander
+go test -run=^$ -fuzz=^FuzzCommand_Roundtrip$ -fuzztime=2m -parallel=2 ./commander
 ```
+
+Defaults are intentionally conservative. `FuzzShell_EchoArgs` forks `/bin/echo` for every iteration, and 10 parallel workers × fork/exec will saturate a laptop (this tipped one dev machine over). Bump `FUZZPARALLEL` when you know the box can take it.
 
 A failing input gets written to `commander/testdata/fuzz/<target>/<hash>` and **replays as a regular unit test** on every subsequent `go test` run. Commit those files — they're the regression suite.
 
@@ -69,10 +71,11 @@ If a future change adds a new such constraint, add it to the skip list *with a c
 
 ## Concurrency model
 
-Go's fuzz harness runs workers in parallel. Two details matter:
+Go's fuzz harness runs workers in parallel. Three details matter:
 
-1. **Across worker processes**, each worker calls `FuzzShell_EchoArgs(f)` independently and gets its own in-process gRPC server via `startServer(f)`. No cross-process state.
-2. **Within a single worker**, a `sync.Mutex` serializes iterations. The shared bufconn transport doesn't love having 10 concurrent streams with fork/exec behind them, so we lock for the duration of one Shell round-trip. Fuzz still explores the input space plenty fast.
+1. **Worker count is capped via `-parallel`**, wired from the `FUZZPARALLEL` env var in `test.sh` (default `2`). Without this, Go defaults to `GOMAXPROCS`, and 10 workers × fork/exec on the Shell target is enough to crash a laptop.
+2. **Across worker processes**, each worker calls `FuzzShell_EchoArgs(f)` independently and gets its own in-process gRPC server via `startServer(f)`. No cross-process state.
+3. **Within a single worker**, a `sync.Mutex` serializes iterations. The shared bufconn transport doesn't love having many concurrent streams with fork/exec behind them, so we lock for the duration of one Shell round-trip. Fuzz still explores the input space plenty fast.
 
 `bufSize` in the test helper is 16 MiB — sized for the current fuzz payload cap plus gRPC framing overhead.
 
