@@ -17,10 +17,23 @@ type commanderServer struct {
 	UnimplementedCommanderServer
 }
 
+// NewCommanderServer returns a Commander server implementation that executes
+// shell commands and streams their stdout/stderr to clients. The returned
+// server is stateless and safe for concurrent use.
 func NewCommanderServer() CommanderServer {
 	return &commanderServer{}
 }
 
+// Shell runs a command and streams its output. When cmd.Args is empty the
+// command string is executed via cmd.Shell (default /bin/sh -c); when Args is
+// set, cmd.Command is exec'd directly with those args and cmd.Shell is ignored.
+//
+// Non-zero exit is NOT surfaced as a gRPC error — the server writes a final
+// "exit status N" chunk to stderr and closes the stream cleanly. Clients must
+// inspect the stream for that marker rather than rely on status.FromError.
+//
+// Cancellation comes from the stream context or cmd.TimeoutSeconds (whichever
+// fires first); both kill the child via exec.CommandContext.
 func (s *commanderServer) Shell(cmd *Command, stream grpc.ServerStreamingServer[Output]) error {
 	if cmd.Command == "" {
 		return status.Error(codes.InvalidArgument, "command cannot be empty")
@@ -143,7 +156,9 @@ func (s *commanderServer) streamOutput(
 		// a final stderr chunk so the client sees it.
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			msg := fmt.Sprintf("exit status %d", exitErr.ExitCode())
-			stream.Send(&Output{Stdout: false, Data: []byte(msg)})
+			if err := stream.Send(&Output{Stdout: false, Data: []byte(msg)}); err != nil {
+				return status.Errorf(codes.Internal, "stream: %v", err)
+			}
 			return nil
 		}
 		return status.Errorf(codes.Internal, "wait: %v", waitErr)

@@ -205,18 +205,43 @@ func TestShell_Timeout(t *testing.T) {
 	client, cleanup := startServer(t)
 	defer cleanup()
 
+	// Use a parent context that is generous relative to the server-side
+	// TimeoutSeconds so we can distinguish "the server's timeout fired"
+	// from "our test context canceled first".
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	start := time.Now()
-	stream, err := client.Shell(context.Background(), &Command{
-		Command:        "sleep 5",
+	stream, err := client.Shell(ctx, &Command{
+		Command:        "sleep 30",
 		TimeoutSeconds: 1,
 	})
 	if err != nil {
 		t.Fatalf("Shell: %v", err)
 	}
-	// Drain to completion — CommandContext kills the child, server reports the
-	// kill signal back as a non-error stream close or as a final stderr chunk.
-	_, _, _ = drain(t, stream)
-	if elapsed := time.Since(start); elapsed > 4*time.Second {
-		t.Fatalf("timeout did not fire within expected window (elapsed=%s)", elapsed)
+
+	// Drain until the server closes the stream. CommandContext kills the
+	// child, and the resulting wait error propagates as a gRPC status
+	// (exec.ExitError is only for processes that exit normally with a
+	// non-zero code; signaled processes land in the Internal branch).
+	drainDone := make(chan error, 1)
+	go func() {
+		_, _, derr := drain(t, stream)
+		drainDone <- derr
+	}()
+
+	select {
+	case <-drainDone:
+		// ok — server closed the stream.
+	case <-time.After(5 * time.Second):
+		t.Fatalf("stream did not close within 5s of 1s server timeout")
+	}
+
+	elapsed := time.Since(start)
+	if elapsed < 500*time.Millisecond {
+		t.Fatalf("stream closed too fast (%s) — timeout path likely not exercised", elapsed)
+	}
+	if elapsed > 4*time.Second {
+		t.Fatalf("stream took too long to close (%s) for a 1s server timeout", elapsed)
 	}
 }
