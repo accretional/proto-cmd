@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package commander;
+
+option go_package = "github.com/accretional/proto-cmd/commander";
+
+// Commander service provides a command-line interface for executing commands
+service Commander {
+    // Shell starts a shell (or binary) and streams back stdout/stderr output.
+    rpc Shell(Command) returns (stream Output);
+}
+
+message Command {
+    // The command to execute (can include shell syntax)
+    string command = 1;
+
+    // Arguments to pass to the command
+    repeated string args = 2;
+
+    // The following may be inferred from a previous command or use defaults.
+
+    // Working directory
+    string working_dir = 3;
+
+    // Environment variables
+    map<string, string> env = 4;
+
+    // Timeout in seconds (0 = no timeout)
+    int32 timeout_seconds = 5;
+
+    // Shell to use (e.g., /bin/sh, /bin/bash)
+    string shell = 6;
+}
+
+message Output {
+    // true = stdout, false = stderr
+    bool stdout = 1;
+    bytes data = 2;
+}
